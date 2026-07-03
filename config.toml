@@ -21,6 +21,8 @@ max_price = 9000
 # descriptions are keyword-spammed, so we filter on the title. This drops a
 # Tracer 7 that surfaced under the MT-07 search.
 title_contains = ["mt07"]
+# Drop other models that borrow the "MT 07" name in their title for reach.
+title_excludes = ["tracer", "tenere", "xtz", "mt09", "mt03", "mt125"]
 
 # Add more later, e.g.:
 # [[searches]]

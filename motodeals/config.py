@@ -33,16 +33,21 @@ class Search:
     # Substrings the listing title must all contain (spacing/punctuation ignored)
     # to count as this model. None = keep everything.
     title_contains: list[str] | None = None
+    # Substrings that, if present in the title, EXCLUDE the listing (e.g. other
+    # models that borrow the name for SEO: "tracer", "tenere").
+    title_excludes: list[str] | None = None
 
     def __post_init__(self):
         if isinstance(self.keywords, str):
             self.keywords = [self.keywords]
 
     def matches_title(self, title: str | None) -> bool:
-        if not self.title_contains:
-            return True
         norm = _normalize(title or "")
-        return all(_normalize(tok) in norm for tok in self.title_contains)
+        if self.title_excludes and any(_normalize(t) in norm for t in self.title_excludes):
+            return False
+        if self.title_contains:
+            return all(_normalize(tok) in norm for tok in self.title_contains)
+        return True
 
 
 @dataclass

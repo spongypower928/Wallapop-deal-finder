@@ -92,8 +92,13 @@ _KM_MIN, _KM_MAX = 100, 250_000
 
 
 def _guess_year(text: str) -> int | None:
-    m = _YEAR_RE.search(text or "")
-    return int(m.group(1)) if m else None
+    from datetime import date
+    this_year = date.today().year
+    for m in _YEAR_RE.finditer(text or ""):
+        y = int(m.group(1))
+        if 1990 <= y <= this_year:  # reject impossible/future years
+            return y
+    return None
 
 
 def _guess_mileage(text: str) -> int | None:
@@ -104,32 +109,44 @@ def _guess_mileage(text: str) -> int | None:
     return None
 
 
-def scrape(search: Search, loc: Location, *, headless: bool = True,
-           max_scrolls: int = 15) -> list[dict]:
-    """Return normalized listing dicts for one search."""
-    captured: list[dict] = []
+SECTION_ENDPOINT = "api.wallapop.com/api/v3/search/section"
+USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/125.0 Safari/537.36")
 
-    def on_response(resp):
-        url = resp.url
-        if "api.wallapop.com" in url and "search" in url:
-            try:
-                data = resp.json()
-            except Exception:
-                return
-            captured.extend(extract_listings(data))
+
+def _next_token(data: dict) -> str | None:
+    return (data.get("meta") or {}).get("next_page")
+
+
+def scrape(search: Search, loc: Location, *, headless: bool = True,
+           max_pages: int = 30) -> list[dict]:
+    """Return normalized listing dicts for one search.
+
+    We load the search page once (to establish the session and capture a real,
+    correctly-headered /search/section request), then paginate by replaying that
+    endpoint with meta.next_page as the cursor — deep, deterministic, no scrolling.
+    """
+    captured: list[dict] = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
-        ctx = browser.new_context(
-            locale="es-ES",
-            user_agent=("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"),
-        )
+        ctx = browser.new_context(locale="es-ES", user_agent=USER_AGENT)
         page = ctx.new_page()
-        page.on("response", on_response)
         cookies_done = False
-        # Run each broad keyword variant in the same session and merge results.
+
         for keyword in search.keywords:
+            first: dict = {}
+
+            def on_response(resp, _first=first):
+                if SECTION_ENDPOINT in resp.url and "url" not in _first:
+                    try:
+                        _first["data"] = resp.json()
+                    except Exception:
+                        return
+                    _first["url"] = resp.url
+                    _first["headers"] = resp.request.all_headers()
+
+            page.on("response", on_response)
             page.goto(_search_url(keyword, search, loc),
                       wait_until="domcontentloaded", timeout=60_000)
             if not cookies_done:
@@ -138,14 +155,42 @@ def scrape(search: Search, loc: Location, *, headless: bool = True,
                 except Exception:
                     pass
                 cookies_done = True
-            # Infinite-scroll to trigger more API pages for this keyword.
-            last_count = -1
-            for _ in range(max_scrolls):
-                page.mouse.wheel(0, 20_000)
-                page.wait_for_timeout(1500)
-                if len(captured) == last_count:
+            page.wait_for_timeout(3000)
+            page.remove_listener("response", on_response)
+
+            if "data" not in first:
+                continue  # keyword yielded no results / blocked
+
+            # Page 1 (already fetched by the browser).
+            data = first["data"]
+            captured.extend(extract_listings(data))
+            token = _next_token(data)
+
+            # Deeper pages: replay the endpoint with the cursor, reusing the
+            # browser's request headers (mpid / x-deviceos etc.) and cookies.
+            base = first["url"].split("?")[0]
+            params = {k: v[0] for k, v in
+                      urllib.parse.parse_qs(urllib.parse.urlparse(first["url"]).query).items()}
+            headers = {k: v for k, v in first["headers"].items() if not k.startswith(":")}
+            pages = 1
+            while token and pages < max_pages:
+                params["next_page"] = token
+                r = ctx.request.get(base + "?" + urllib.parse.urlencode(params),
+                                    headers=headers)
+                if r.status != 200:
                     break
-                last_count = len(captured)
+                try:
+                    data = r.json()
+                except Exception:
+                    break
+                new = extract_listings(data)
+                if not new:
+                    break
+                captured.extend(new)
+                token = _next_token(data)
+                pages += 1
+                page.wait_for_timeout(400)  # be polite
+
         browser.close()
 
     # Dedup by item id and normalize into our storage schema.

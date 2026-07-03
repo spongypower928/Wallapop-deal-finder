@@ -101,8 +101,9 @@ def cmd_deals(args: argparse.Namespace) -> None:
                 warn += " ⚠" + ",".join(flags)
             tag = "DEAL" if disc >= args.min_discount else "    "
             dup = f" (×{count} reposts)" if count > 1 else ""
+            cond = r["condition"] or "?"
             print(f"  {tag} {disc:+5.0%}  {r['price']:>6.0f}€ (est {est:>6.0f}€)  "
-                  f"{r['year']}  {r['mileage_km']:>6}km  {r['condition']:<10}{warn}{dup}")
+                  f"{r['year']}  {r['mileage_km']:>6}km  {cond:<10}{warn}{dup}")
             print(f"        {r['title'][:55]}  {r['url']}")
             shown += 1
         if shown == 0:
