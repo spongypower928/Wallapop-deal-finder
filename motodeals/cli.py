@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from . import config, db, extract as extract_mod, pricing
+from . import config, db, extract as extract_mod, pricing, report
 from .scrapers import wallapop
 
 
@@ -34,8 +34,14 @@ def cmd_extract(args: argparse.Namespace) -> None:
     where = "" if args.all else "WHERE extracted_at IS NULL"
     limit = f"LIMIT {args.limit}" if args.limit else ""
     rows = conn.execute(
-        f"SELECT id, title, raw FROM listings {where} ORDER BY last_seen DESC {limit}"
+        f"SELECT id, model, title, raw FROM listings {where} ORDER BY last_seen DESC {limit}"
     ).fetchall()
+    # Skip listings that don't pass their model's relevance filter — no point
+    # spending LLM time on bikes that can never appear as deals.
+    if not args.include_irrelevant:
+        searches = {s.name: s for s in config.load().searches}
+        rows = [r for r in rows
+                if r["model"] in searches and searches[r["model"]].matches_title(r["title"])]
     print(f"Extracting {len(rows)} listing(s) with model {args.model!r} ...")
     ok = 0
     for i, r in enumerate(rows, 1):
@@ -57,62 +63,70 @@ def cmd_extract(args: argparse.Namespace) -> None:
     conn.close()
 
 
+def _score_search(conn, search, args):
+    """Return (model, ranked_deals) for one search. ranked_deals is a list of
+    dicts (deal-shaped, deduped, sorted by discount desc) honoring the filters."""
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM listings WHERE model = ? AND price IS NOT NULL",
+        (search.name,))]
+    rows = [r for r in rows if search.matches_title(r["title"])]  # drop spam mismatches
+    priced = [r for r in rows if r["year"] and r["mileage_km"]]
+    model = pricing.fit(pricing.dedup_samples(priced))
+
+    # Collapse dealer reposts (identical year/mileage/price) into one entry.
+    by_key: dict[tuple, dict] = {}
+    for r in priced:
+        key = (r["year"], r["mileage_km"], round(r["price"] / 50) * 50)
+        by_key.setdefault(key, {"row": r, "count": 0})["count"] += 1
+
+    deals = []
+    for entry in by_key.values():
+        r = entry["row"]
+        est = model.predict(pricing.CURRENT_YEAR - r["year"], r["mileage_km"])
+        disc = (est - r["price"]) / est if est > 0 else 0.0
+        if not args.all and disc < args.min_discount:
+            continue
+        if abs(disc) < 0.005:
+            disc = 0.0
+        deals.append({
+            "disc": disc, "est": est, "price": r["price"], "year": r["year"],
+            "mileage_km": r["mileage_km"], "condition": r["condition"],
+            "red_flags": json.loads(r["red_flags"]) if r["red_flags"] else [],
+            "count": entry["count"], "title": r["title"], "url": r["url"],
+            "image": report.image_url(json.loads(r["raw"])),
+        })
+    deals.sort(key=lambda d: d["disc"], reverse=True)
+    return model, deals, len(rows), len(priced)
+
+
 def cmd_deals(args: argparse.Namespace) -> None:
     cfg = config.load()
     conn = db.connect()
+    html_sections = []
     for search in cfg.searches:
-        rows = [dict(r) for r in conn.execute(
-            "SELECT * FROM listings WHERE model = ? AND price IS NOT NULL",
-            (search.name,))]
-        # Titles carry the real model; drop keyword-spam mismatches.
-        rows = [r for r in rows if search.matches_title(r["title"])]
-        priced = [r for r in rows if r["year"] and r["mileage_km"]]
-
-        model = pricing.fit(pricing.dedup_samples(priced))
-        print(f"\n== {search.name} ==  {len(rows)} listings "
-              f"({len(priced)} with year+km) | fair-price model: {model.kind}, "
-              f"n={model.n}, R²={model.r2:.2f}")
-
-        # Collapse dealer reposts (identical year/mileage/price) into one entry.
-        by_key: dict[tuple, dict] = {}
-        for r in priced:
-            key = (r["year"], r["mileage_km"], round(r["price"] / 50) * 50)
-            by_key.setdefault(key, {"row": r, "count": 0})["count"] += 1
-
-        scored = []
-        for entry in by_key.values():
-            r = entry["row"]
-            est = model.predict(pricing.CURRENT_YEAR - r["year"], r["mileage_km"])
-            disc = (est - r["price"]) / est if est > 0 else 0.0
-            scored.append((disc, est, r, entry["count"]))
-        scored.sort(key=lambda t: t[0], reverse=True)
-
-        shown = 0
-        for disc, est, r, count in scored:
-            if not args.all and disc < args.min_discount:
-                continue
-            if abs(disc) < 0.005:
-                disc = 0.0  # avoid "-0%"
-            flags = json.loads(r["red_flags"]) if r["red_flags"] else []
-            warn = ""
-            if r["condition"] == "needs_work":
-                warn += " ⚠needs_work"
-            if flags:
-                warn += " ⚠" + ",".join(flags)
-            tag = "DEAL" if disc >= args.min_discount else "    "
-            dup = f" (×{count} reposts)" if count > 1 else ""
-            cond = r["condition"] or "?"
-            print(f"  {tag} {disc:+5.0%}  {r['price']:>6.0f}€ (est {est:>6.0f}€)  "
-                  f"{r['year']}  {r['mileage_km']:>6}km  {cond:<10}{warn}{dup}")
-            print(f"        {r['title'][:55]}  {r['url']}")
-            shown += 1
-        if shown == 0:
+        model, deals, n_rows, n_priced = _score_search(conn, search, args)
+        print(f"\n== {search.name} ==  {n_rows} listings ({n_priced} with year+km) "
+              f"| fair-price model: {model.kind}, n={model.n}, R²={model.r2:.2f}")
+        for d in deals:
+            warn = " ⚠needs_work" if d["condition"] == "needs_work" else ""
+            if d["red_flags"]:
+                warn += " ⚠" + ",".join(d["red_flags"])
+            tag = "DEAL" if d["disc"] >= args.min_discount else "    "
+            dup = f" (×{d['count']} reposts)" if d["count"] > 1 else ""
+            print(f"  {tag} {d['disc']:+5.0%}  {d['price']:>6.0f}€ (est {d['est']:>6.0f}€)  "
+                  f"{d['year']}  {d['mileage_km']:>6}km  {(d['condition'] or '?'):<10}{warn}{dup}")
+            print(f"        {(d['title'] or '')[:55]}  {d['url']}")
+        if not deals:
             print(f"  (no listings ≥ {args.min_discount:.0%} under estimate; "
                   f"use --all to see everything)")
+        html_sections.append((f"{search.name} — {model.kind} model, "
+                              f"n={model.n}, R²={model.r2:.2f}", deals))
 
-        unpriced = [r for r in rows if not (r["year"] and r["mileage_km"])]
-        if unpriced and args.all:
-            print(f"  -- {len(unpriced)} without year+km (can't estimate) --")
+    if args.html:
+        with open(args.html, "w", encoding="utf-8") as f:
+            f.write(report.render(html_sections))
+        total = sum(len(d) for _, d in html_sections)
+        print(f"\nWrote {total} deals to {args.html} — open it in a browser.")
     conn.close()
 
 
@@ -149,6 +163,8 @@ def main() -> None:
     p_extract.add_argument("--all", action="store_true",
                            help="re-extract everything, not just un-extracted rows")
     p_extract.add_argument("--limit", type=int, default=0, help="cap number of rows")
+    p_extract.add_argument("--include-irrelevant", action="store_true",
+                           help="also extract listings that fail the title filter")
     p_extract.set_defaults(func=cmd_extract)
 
     p_deals = sub.add_parser("deals", help="rank listings by %% below fair price")
@@ -156,6 +172,8 @@ def main() -> None:
                          help="threshold to flag a DEAL (default 0.10 = 10%%)")
     p_deals.add_argument("--all", action="store_true",
                          help="show every priced listing, not just deals")
+    p_deals.add_argument("--html", metavar="PATH",
+                         help="also write a browsable HTML report (photos + links)")
     p_deals.set_defaults(func=cmd_deals)
 
     p_list = sub.add_parser("list", help="print stored listings")

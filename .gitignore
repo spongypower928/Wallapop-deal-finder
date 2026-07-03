@@ -18,6 +18,10 @@ ollama/
 *.tar.zst
 *.tgz
 
+# Generated deal reports (contain scraped listing data + third-party image URLs)
+deals.html
+*.report.html
+
 # Env files (in case any are added later)
 .env
 .env.*
