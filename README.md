@@ -48,3 +48,5 @@ python -m motodeals list         # dump the database
 - Scraped data (`data/`) contains third-party sellers' personal data and is
   git-ignored — do not publish it.
 - Respect each site's Terms of Service; this is for personal, low-volume use.
+
+- **USE UNDER YOUR OWN RISK** 
