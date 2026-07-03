@@ -1,0 +1,6 @@
+# Stage 1 (scraping) — pure-ish, no heavy binary wheels
+playwright>=1.44
+
+# Stage 2+ (modeling) — install later, ideally in a Python 3.12 conda env
+# pandas>=2.2
+# scikit-learn>=1.5

@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Local Claude Code settings (machine-specific)
+.claude/
+
+# Scraped data — contains third-party sellers' PERSONAL DATA (user ids, GPS,
+# postal codes). Never commit / publish this.
+data/
+
+# Local model runtime / logs
+*.log
+ollama/
+*.tar.zst
+*.tgz
+
+# Env files (in case any are added later)
+.env
+.env.*

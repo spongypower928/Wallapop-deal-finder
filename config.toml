@@ -1,0 +1,30 @@
+# Center point for the search (Wallapop is geo-based). Default: Madrid.
+[location]
+latitude = 40.4168
+longitude = -3.7038
+# Max distance in km from the point above (Wallapop supports 400 = "all Spain").
+distance_km = 400
+
+# One [[searches]] block per model you want to track.
+# `keywords` = one or more broad terms typed into Wallapop's search box. We run
+#   each and MERGE + de-duplicate results, so cast a wide net for recall — the
+#   real "is this actually an MT-07?" decision happens later from the listing
+#   text, not from the search term.
+# `name` = stable slug used as the label for this model's data.
+[[searches]]
+name = "yamaha-mt-07"
+keywords = ["yamaha mt07", "yamaha mt 07", "mt-07", "mt07"]
+min_price = 2000
+max_price = 9000
+# Keep only listings whose TITLE contains all of these (spacing/dashes ignored,
+# so "mt07" matches "MT-07", "MT 07", "mt07"). Titles carry the real model;
+# descriptions are keyword-spammed, so we filter on the title. This drops a
+# Tracer 7 that surfaced under the MT-07 search.
+title_contains = ["mt07"]
+
+# Add more later, e.g.:
+# [[searches]]
+# name = "honda-cb500f"
+# keywords = ["honda cb500f", "cb500", "honda cb 500"]
+# min_price = 2500
+# max_price = 7000
