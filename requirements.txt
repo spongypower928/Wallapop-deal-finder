@@ -1,6 +1,9 @@
 # Stage 1 (scraping) — pure-ish, no heavy binary wheels
 playwright>=1.44
 
-# Stage 2+ (modeling) — install later, ideally in a Python 3.12 conda env
+# Plots (data + regression diagnostics)
+matplotlib>=3.8
+
+# Optional heavier modeling — not required (we use pure-Python OLS)
 # pandas>=2.2
 # scikit-learn>=1.5

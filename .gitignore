@@ -22,6 +22,9 @@ ollama/
 deals.html
 *.report.html
 
+# Generated diagnostic plots
+plots/
+
 # Env files (in case any are added later)
 .env
 .env.*

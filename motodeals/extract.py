@@ -121,6 +121,10 @@ def _validate(data: dict) -> dict:
     condition = data.get("condition")
     if condition not in ("new", "used", "needs_work"):
         condition = "used"
+    # A bike with real mileage on it is not "new" — the small model over-uses
+    # "new" for late-model bikes, so correct it against the odometer.
+    if condition == "new" and mileage is not None and mileage > 100:
+        condition = "used"
 
     has_itv = data.get("has_itv")
     if has_itv not in (True, False, None):

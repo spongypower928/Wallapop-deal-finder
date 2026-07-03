@@ -130,6 +130,64 @@ def cmd_deals(args: argparse.Namespace) -> None:
     conn.close()
 
 
+def cmd_check(args: argparse.Namespace) -> None:
+    """Data-quality sweep: report (and with --fix, correct) implausible rows."""
+    from datetime import date
+    yr = date.today().year
+    conn = db.connect()
+
+    new_km = conn.execute(
+        "SELECT COUNT(*) FROM listings WHERE condition='new' AND mileage_km>100"
+    ).fetchone()[0]
+    yr_eq_km = conn.execute(
+        "SELECT COUNT(*) FROM listings WHERE mileage_km = year"
+    ).fetchone()[0]
+    # softer: mileage looks like a year but isn't an exact match (report only)
+    yearlike = conn.execute(
+        "SELECT year, mileage_km, title FROM listings "
+        "WHERE mileage_km BETWEEN 1990 AND ? AND mileage_km <> year", (yr,)
+    ).fetchall()
+
+    print(f"'new' but >100km (→ used):        {new_km}")
+    print(f"mileage == year (misparse → null): {yr_eq_km}")
+    print(f"mileage looks like a year (review): {len(yearlike)}")
+    for r in yearlike[:10]:
+        print(f"    year={r['year']} km={r['mileage_km']}  {r['title'][:50]}")
+
+    if args.fix:
+        c1 = conn.execute(
+            "UPDATE listings SET condition='used' "
+            "WHERE condition='new' AND mileage_km>100").rowcount
+        c2 = conn.execute(
+            "UPDATE listings SET mileage_km=NULL WHERE mileage_km = year").rowcount
+        conn.commit()
+        print(f"\nfixed: {c1} condition new→used, {c2} mileage nulled")
+    else:
+        print("\n(run with --fix to apply corrections)")
+    conn.close()
+
+
+def cmd_plot(args: argparse.Namespace) -> None:
+    from . import plots
+    import os
+    cfg = config.load()
+    conn = db.connect()
+    os.makedirs(args.out_dir, exist_ok=True)
+    for search in cfg.searches:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM listings WHERE model=? AND price IS NOT NULL "
+            "AND year IS NOT NULL AND mileage_km IS NOT NULL", (search.name,))]
+        rows = [r for r in rows if search.matches_title(r["title"])]
+        if not rows:
+            print(f"{search.name}: no priced listings yet")
+            continue
+        model = pricing.fit(pricing.dedup_samples(rows))
+        path = os.path.join(args.out_dir, f"{search.name}.png")
+        plots.make(search.name, rows, model, path)
+        print(f"{search.name}: wrote {path} ({len(rows)} listings, R²={model.r2:.2f})")
+    conn.close()
+
+
 def cmd_list(args: argparse.Namespace) -> None:
     conn = db.connect()
     rows = conn.execute(
@@ -175,6 +233,14 @@ def main() -> None:
     p_deals.add_argument("--html", metavar="PATH",
                          help="also write a browsable HTML report (photos + links)")
     p_deals.set_defaults(func=cmd_deals)
+
+    p_check = sub.add_parser("check", help="data-quality sweep (--fix to correct)")
+    p_check.add_argument("--fix", action="store_true", help="apply corrections")
+    p_check.set_defaults(func=cmd_check)
+
+    p_plot = sub.add_parser("plot", help="save data + regression diagnostic plots")
+    p_plot.add_argument("--out-dir", default="plots", help="output directory")
+    p_plot.set_defaults(func=cmd_plot)
 
     p_list = sub.add_parser("list", help="print stored listings")
     p_list.set_defaults(func=cmd_list)
