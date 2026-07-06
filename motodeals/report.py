@@ -82,8 +82,11 @@ _MAP = """
 const DEALS = {markers};
 const CENTER = {center};
 const map = L.map('map');
-L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
-  {{maxZoom: 18, attribution: '&copy; OpenStreetMap'}}).addTo(map);
+// CARTO basemap (OSM data, no API key, allows keyless local/file:// use —
+// avoids OpenStreetMap's tile policy that rejects requests without a Referer).
+L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}.png',
+  {{maxZoom: 19, subdomains: 'abcd',
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO'}}).addTo(map);
 function style(d) {{
   if (d >= 0.40) return {{c: '#0b5e2a', r: 15}};
   if (d >= 0.30) return {{c: '#1f7a44', r: 12}};
