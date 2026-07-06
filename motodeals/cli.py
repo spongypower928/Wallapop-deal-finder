@@ -42,7 +42,10 @@ def cmd_extract(args: argparse.Namespace) -> None:
         searches = {s.name: s for s in config.load().searches}
         rows = [r for r in rows
                 if r["model"] in searches and searches[r["model"]].matches_title(r["title"])]
-    print(f"Extracting {len(rows)} listing(s) with model {args.model!r} ...")
+    import time
+    total = len(rows)
+    print(f"Extracting {total} listing(s) with model {args.model!r} ...", flush=True)
+    start = time.time()
     ok = 0
     for i, r in enumerate(rows, 1):
         raw = json.loads(r["raw"])
@@ -55,11 +58,15 @@ def cmd_extract(args: argparse.Namespace) -> None:
         db.update_extraction(conn, r["id"], data)
         conn.commit()
         ok += 1
+        elapsed = time.time() - start
+        eta = elapsed / i * (total - i)
+        pct = i / total * 100
         km = f"{data['mileage']}km" if data["mileage"] else "?km"
         flags = ", ".join(data["red_flags"]) or "-"
-        print(f"  [{i}/{len(rows)}] {km:>9} {data['condition']:>10} "
-              f"itv={data['has_itv']}  flags: {flags}")
-    print(f"\nExtracted {ok}/{len(rows)}.")
+        print(f"  [{i}/{total} {pct:4.0f}%] ETA {eta/60:4.1f}m | "
+              f"{km:>9} {data['condition']:>10} itv={str(data['has_itv']):>5} | "
+              f"{(r['title'] or '')[:34]:34} flags: {flags}", flush=True)
+    print(f"\nExtracted {ok}/{total} in {(time.time()-start)/60:.1f} min.")
     conn.close()
 
 
