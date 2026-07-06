@@ -82,6 +82,10 @@ def _score_search(conn, search, args):
     deals = []
     for entry in by_key.values():
         r = entry["row"]
+        if args.year_min and r["year"] < args.year_min:
+            continue
+        if args.year_max and r["year"] > args.year_max:
+            continue
         est = model.predict(pricing.CURRENT_YEAR - r["year"], r["mileage_km"])
         disc = (est - r["price"]) / est if est > 0 else 0.0
         if not args.all and disc < args.min_discount:
@@ -242,6 +246,8 @@ def main() -> None:
                          help="threshold to flag a DEAL (default 0.10 = 10%%)")
     p_deals.add_argument("--all", action="store_true",
                          help="show every priced listing, not just deals")
+    p_deals.add_argument("--year-min", type=int, help="only show listings from this year on")
+    p_deals.add_argument("--year-max", type=int, help="only show listings up to this year")
     p_deals.add_argument("--html", metavar="PATH",
                          help="also write a browsable HTML report (photos + links)")
     p_deals.set_defaults(func=cmd_deals)

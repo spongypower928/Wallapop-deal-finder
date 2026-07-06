@@ -6,27 +6,59 @@ longitude = -3.7038
 distance_km = 400
 
 # One [[searches]] block per model you want to track.
-# `keywords` = one or more broad terms typed into Wallapop's search box. We run
-#   each and MERGE + de-duplicate results, so cast a wide net for recall — the
-#   real "is this actually an MT-07?" decision happens later from the listing
-#   text, not from the search term.
-# `name` = stable slug used as the label for this model's data.
-[[searches]]
-name = "yamaha-mt-07"
-keywords = ["yamaha mt07", "yamaha mt 07", "mt-07", "mt07"]
-min_price = 2000
-max_price = 9000
-# Keep only listings whose TITLE contains all of these (spacing/dashes ignored,
-# so "mt07" matches "MT-07", "MT 07", "mt07"). Titles carry the real model;
-# descriptions are keyword-spammed, so we filter on the title. This drops a
-# Tracer 7 that surfaced under the MT-07 search.
-title_contains = ["mt07"]
-# Drop other models that borrow the "MT 07" name in their title for reach.
-title_excludes = ["tracer", "tenere", "xtz", "mt09", "mt03", "mt125"]
+# `keywords`      = broad terms typed into Wallapop's search box (run + merged).
+# `title_contains`= ALL must appear in the title (spacing/dashes ignored) to keep it.
+# `title_excludes`= if ANY appears in the title, drop it.
+# `name`          = stable slug label for this model's data.
 
-# Add more later, e.g.:
+# --- 600cc supersport (fully-faired sportbikes), ~2008, ~4000 € ------------------
+
+[[searches]]
+name = "suzuki-gsxr-600"
+keywords = ["suzuki gsxr 600", "gsx-r 600", "gsxr600", "gsxr 600"]
+min_price = 2500
+max_price = 6500
+title_contains = ["gsxr", "600"]           # "gsxr"+"600" => not the naked GSR/GSX-S, not 750/1000
+title_excludes = ["750", "1000", "gsr", "gsxs", "bandit", "despiece", "desguace", "piezas"]
+
+[[searches]]
+name = "honda-cbr-600rr"
+keywords = ["honda cbr 600rr", "cbr600rr", "cbr 600", "honda cbr 600"]
+min_price = 2500
+max_price = 6500
+title_contains = ["cbr600"]                # catches 600RR and faired 600F; excludes CBR1000/650
+title_excludes = ["hornet", "cb600", "1000", "650", "125", "despiece", "desguace", "piezas"]
+
+[[searches]]
+name = "kawasaki-zx6r"
+keywords = ["kawasaki zx6r", "zx-6r", "ninja zx6r", "zx 6r", "zx6r 636"]
+min_price = 2500
+max_price = 6500
+title_contains = ["zx6r"]                  # 599 & 636 both supersport; excludes ZX-10R, naked Z
+title_excludes = ["zx10r", "zx-10", "z750", "z650", "despiece", "desguace", "piezas"]
+
+[[searches]]
+name = "yamaha-r6"
+keywords = ["yamaha r6", "yzf r6", "yamaha yzf-r6", "r6 600"]
+min_price = 2500
+max_price = 6500
+# Require brand + "r6" so we don't grab a GSX-R600 ("...r600...") or a CBR600.
+title_contains = ["yamaha", "r6"]
+title_excludes = ["r1", "mt", "fz6", "fazer", "xj6", "despiece", "desguace", "piezas"]
+
+[[searches]]
+name = "triumph-daytona-675"
+keywords = ["triumph daytona 675", "daytona 675", "triumph daytona"]
+min_price = 2500
+max_price = 6500
+title_contains = ["daytona", "675"]        # the supersport 675; excludes the bigger 955i
+title_excludes = ["955", "900", "1200", "street triple", "speed triple", "despiece", "desguace", "piezas"]
+
+# --- previous interest (kept, disabled so it isn't re-scraped) -------------------
 # [[searches]]
-# name = "honda-cb500f"
-# keywords = ["honda cb500f", "cb500", "honda cb 500"]
-# min_price = 2500
-# max_price = 7000
+# name = "yamaha-mt-07"
+# keywords = ["yamaha mt07", "yamaha mt 07", "mt-07", "mt07"]
+# min_price = 2000
+# max_price = 9000
+# title_contains = ["mt07"]
+# title_excludes = ["tracer", "tenere", "xtz", "mt09", "mt03", "mt125"]
