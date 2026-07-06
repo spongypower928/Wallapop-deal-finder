@@ -142,15 +142,24 @@ def cmd_check(args: argparse.Namespace) -> None:
     yr_eq_km = conn.execute(
         "SELECT COUNT(*) FROM listings WHERE mileage_km = year"
     ).fetchone()[0]
+    # Implausible km-per-year ⇒ the (regex) YEAR is wrong, since mileage is now
+    # LLM-derived. A used bike almost never exceeds ~25k km/yr; anything above
+    # that is a misparsed year (e.g. a "2026" with 66,000 km).
+    KMY_MAX = 25_000
+    bad_year = conn.execute(
+        "SELECT COUNT(*) FROM listings WHERE year IS NOT NULL AND mileage_km IS NOT NULL "
+        "AND CAST(mileage_km AS REAL) / MAX(? - year, 1) > ?", (yr, KMY_MAX)
+    ).fetchone()[0]
     # softer: mileage looks like a year but isn't an exact match (report only)
     yearlike = conn.execute(
         "SELECT year, mileage_km, title FROM listings "
         "WHERE mileage_km BETWEEN 1990 AND ? AND mileage_km <> year", (yr,)
     ).fetchall()
 
-    print(f"'new' but >100km (→ used):        {new_km}")
-    print(f"mileage == year (misparse → null): {yr_eq_km}")
-    print(f"mileage looks like a year (review): {len(yearlike)}")
+    print(f"'new' but >100km (→ used):          {new_km}")
+    print(f"mileage == year (misparse → null):   {yr_eq_km}")
+    print(f"impossible km/year (year → null):    {bad_year}")
+    print(f"mileage looks like a year (review):  {len(yearlike)}")
     for r in yearlike[:10]:
         print(f"    year={r['year']} km={r['mileage_km']}  {r['title'][:50]}")
 
@@ -160,8 +169,11 @@ def cmd_check(args: argparse.Namespace) -> None:
             "WHERE condition='new' AND mileage_km>100").rowcount
         c2 = conn.execute(
             "UPDATE listings SET mileage_km=NULL WHERE mileage_km = year").rowcount
+        c3 = conn.execute(
+            "UPDATE listings SET year=NULL WHERE year IS NOT NULL AND mileage_km IS NOT NULL "
+            "AND CAST(mileage_km AS REAL) / MAX(? - year, 1) > ?", (yr, KMY_MAX)).rowcount
         conn.commit()
-        print(f"\nfixed: {c1} condition new→used, {c2} mileage nulled")
+        print(f"\nfixed: {c1} condition new→used, {c2} mileage nulled, {c3} year nulled")
     else:
         print("\n(run with --fix to apply corrections)")
     conn.close()
