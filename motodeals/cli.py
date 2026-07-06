@@ -99,12 +99,16 @@ def _score_search(conn, search, args):
             continue
         if abs(disc) < 0.005:
             disc = 0.0
+        raw = json.loads(r["raw"])
+        coord = report.latlon(raw)
         deals.append({
             "disc": disc, "est": est, "price": r["price"], "year": r["year"],
             "mileage_km": r["mileage_km"], "condition": r["condition"],
             "red_flags": json.loads(r["red_flags"]) if r["red_flags"] else [],
             "count": entry["count"], "title": r["title"], "url": r["url"],
-            "image": report.image_url(json.loads(r["raw"])),
+            "image": report.image_url(raw),
+            "lat": coord[0] if coord else None,
+            "lon": coord[1] if coord else None,
         })
     deals.sort(key=lambda d: d["disc"], reverse=True)
     return model, deals, len(rows), len(priced)
@@ -134,8 +138,9 @@ def cmd_deals(args: argparse.Namespace) -> None:
                               f"n={model.n}, R²={model.r2:.2f}", deals))
 
     if args.html:
+        center = (cfg.location.latitude, cfg.location.longitude)
         with open(args.html, "w", encoding="utf-8") as f:
-            f.write(report.render(html_sections))
+            f.write(report.render(html_sections, center=center))
         total = sum(len(d) for _, d in html_sections)
         print(f"\nWrote {total} deals to {args.html} — open it in a browser.")
     conn.close()
