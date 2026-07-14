@@ -14,29 +14,21 @@ from dataclasses import dataclass
 from datetime import date
 
 CURRENT_YEAR = date.today().year
-MIN_SAMPLES_FOR_REGRESSION = 6   # linear (age + km)
-MIN_SAMPLES_FOR_QUAD = 12        # quadratic (age + km + km²) needs a bit more data
+MIN_SAMPLES_FOR_REGRESSION = 6
 PRICE_FLOOR = 300.0              # predictions never go below this
 
 
 @dataclass
 class PriceModel:
-    coef: list[float]          # [intercept, per-year-age, per-1000km, per-(1000km)²]
-    kind: str                  # 'quadratic' | 'linear' | 'mean'
+    coef: list[float]          # [intercept, per-year-age, per-1000km]
+    kind: str                  # 'linear' | 'mean'
     n: int                     # training samples used
-    r2: float                  # in-sample fit quality (0..1); 0 for mean model
+    r2: float                  # R² fit quality (0..1); 0 for mean model
+    mae: float                 # median absolute error (€) — honest metric for truncated price bands
 
     def predict(self, age: float, mileage_km: float) -> float:
-        b0, b_age, b_km, b_km2 = self.coef
-        kmk = mileage_km / 1000.0
-        # Guard: if the parabola opens upward it would (wrongly) predict price
-        # RISING past a certain mileage. Clamp mileage at that vertex so high-km
-        # bikes plateau at a floor instead of curving back up.
-        if b_km2 > 0:
-            vertex = -b_km / (2 * b_km2)
-            if vertex > 0 and kmk > vertex:
-                kmk = vertex
-        val = b0 + b_age * age + b_km * kmk + b_km2 * kmk * kmk
+        b0, b_age, b_km = self.coef
+        val = b0 + b_age * age + b_km * (mileage_km / 1000.0)
         return max(val, PRICE_FLOOR)
 
 
@@ -61,36 +53,33 @@ def _solve(a: list[list[float]], y: list[float]) -> list[float] | None:
 
 def fit(samples: list[tuple[float, float, float]]) -> PriceModel:
     """samples: list of (age_years, mileage_km, price). Deduplicated by the
-    caller. Prefers a quadratic-in-mileage fit (so high km is punished
-    progressively), falling back to linear, then to the mean price."""
+    caller. Fits a linear model (price ~ age + km), or falls back to mean."""
     prices = [s[2] for s in samples]
     n = len(samples)
     mean_price = sum(prices) / n if n else 0.0
 
-    # (min_samples, kind, n_features) — most expressive first.
-    for min_n, kind, ncols in ((MIN_SAMPLES_FOR_QUAD, "quadratic", 4),
-                               (MIN_SAMPLES_FOR_REGRESSION, "linear", 3)):
-        if n < min_n:
-            continue
-        # Design rows: [1, age, km/1000, (km/1000)²] (drop last col if linear).
-        X = []
-        for s in samples:
-            kmk = s[1] / 1000.0
-            X.append([1.0, s[0], kmk, kmk * kmk][:ncols])
-        xtx = [[sum(X[k][i] * X[k][j] for k in range(n)) for j in range(ncols)]
-               for i in range(ncols)]
-        xty = [sum(X[k][i] * prices[k] for k in range(n)) for i in range(ncols)]
+    if n >= MIN_SAMPLES_FOR_REGRESSION:
+        # Design matrix: [1, age, km/1000]
+        X = [[1.0, s[0], s[1] / 1000.0] for s in samples]
+        xtx = [[sum(X[k][i] * X[k][j] for k in range(n)) for j in range(3)]
+               for i in range(3)]
+        xty = [sum(X[k][i] * prices[k] for k in range(n)) for i in range(3)]
         coef = _solve(xtx, xty)
-        if coef is None:
-            continue
-        model = PriceModel(coef=coef + [0.0] * (4 - ncols), kind=kind, n=n, r2=0.0)
-        preds = [model.predict(s[0], s[1]) for s in samples]  # includes clamp+floor
-        ss_res = sum((p - q) ** 2 for p, q in zip(prices, preds))
-        ss_tot = sum((p - mean_price) ** 2 for p in prices) or 1.0
-        model.r2 = max(0.0, 1.0 - ss_res / ss_tot)
-        return model
+        if coef is not None:
+            preds = [coef[0] + coef[1] * s[0] + coef[2] * (s[1] / 1000.0)
+                     for s in samples]
+            preds = [max(p, PRICE_FLOOR) for p in preds]  # clamp to floor
+            ss_res = sum((p - q) ** 2 for p, q in zip(prices, preds))
+            ss_tot = sum((p - mean_price) ** 2 for p in prices) or 1.0
+            r2 = max(0.0, 1.0 - ss_res / ss_tot)
+            # MAE: median absolute error (more robust than RMSE on truncated data)
+            errs = sorted([abs(p - q) for p, q in zip(prices, preds)])
+            mae = errs[len(errs) // 2] if errs else 0.0
+            model = PriceModel(coef=coef, kind="linear", n=n, r2=r2, mae=mae)
+            return model
 
-    return PriceModel(coef=[mean_price, 0.0, 0.0, 0.0], kind="mean", n=n, r2=0.0)
+    model = PriceModel(coef=[mean_price, 0.0, 0.0], kind="mean", n=n, r2=0.0, mae=0.0)
+    return model
 
 
 def dedup_samples(rows: list[dict]) -> list[tuple[float, float, float]]:

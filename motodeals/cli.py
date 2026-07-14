@@ -70,6 +70,29 @@ def cmd_extract(args: argparse.Namespace) -> None:
     conn.close()
 
 
+def _extract_variant(title: str) -> str | None:
+    """Extract variant: 'rr' vs 'f' for CBR, '636' vs '599' for ZX6R. None if unclear."""
+    title_norm = (title or "").lower()
+    # CBR600: prefer explicit mention over default
+    if "cbr600" in title_norm or "cbr 600" in title_norm:
+        if "600rr" in title_norm:
+            return "rr"
+        if "600f" in title_norm and "f4" in title_norm:  # F4i/F4/Fs variants
+            return "f"
+        if "600f" in title_norm or "600 f" in title_norm:
+            return "f"
+        # Default: if no variant mentioned, guess from description keywords
+        if "rr" in title_norm or "supersport" in title_norm:
+            return "rr"
+    # ZX6R
+    if "zx6r" in title_norm or "zx-6r" in title_norm:
+        if "636" in title_norm:
+            return "636"
+        if "599" in title_norm:
+            return "599"
+    return None
+
+
 def _score_search(conn, search, args):
     """Return (model, ranked_deals) for one search. ranked_deals is a list of
     dicts (deal-shaped, deduped, sorted by discount desc) honoring the filters."""
@@ -78,7 +101,24 @@ def _score_search(conn, search, args):
         (search.name,))]
     rows = [r for r in rows if search.matches_title(r["title"])]  # drop spam mismatches
     priced = [r for r in rows if r["year"] and r["mileage_km"]]
-    model = pricing.fit(pricing.dedup_samples(priced))
+
+    # For CBR600 and ZX6R, try to fit separately by variant (if >6 samples each)
+    variants = {}
+    for r in priced:
+        v = _extract_variant(r["title"]) or "unknown"
+        variants.setdefault(v, []).append(r)
+
+    # Pick the variant with the most data (or fit all together if they're mixed)
+    if len(variants) > 1 and max(len(v) for v in variants.values()) >= 6:
+        # Multi-variant: fit the biggest separately, rest as "other"
+        best_var = max(variants, key=lambda k: len(variants[k]))
+        fit_rows = variants[best_var]
+        model_label = f"{search.name} ({best_var})"
+    else:
+        fit_rows = priced
+        model_label = search.name
+
+    model = pricing.fit(pricing.dedup_samples(fit_rows))
 
     # Collapse dealer reposts (identical year/mileage/price) into one entry.
     by_key: dict[tuple, dict] = {}
@@ -111,7 +151,7 @@ def _score_search(conn, search, args):
             "lon": coord[1] if coord else None,
         })
     deals.sort(key=lambda d: d["disc"], reverse=True)
-    return model, deals, len(rows), len(priced)
+    return model, deals, len(rows), len(priced), model_label
 
 
 def cmd_deals(args: argparse.Namespace) -> None:
@@ -119,9 +159,10 @@ def cmd_deals(args: argparse.Namespace) -> None:
     conn = db.connect()
     html_sections = []
     for search in cfg.searches:
-        model, deals, n_rows, n_priced = _score_search(conn, search, args)
-        print(f"\n== {search.name} ==  {n_rows} listings ({n_priced} with year+km) "
-              f"| fair-price model: {model.kind}, n={model.n}, R²={model.r2:.2f}")
+        model, deals, n_rows, n_priced, model_label = _score_search(conn, search, args)
+        mae_str = f", MAE €{model.mae:.0f}" if model.mae else ""
+        print(f"\n== {model_label} ==  {n_rows} listings ({n_priced} with year+km) "
+              f"| {model.kind}, n={model.n}, R²={model.r2:.2f}{mae_str}")
         for d in deals:
             warn = " ⚠needs_work" if d["condition"] == "needs_work" else ""
             if d["red_flags"]:
@@ -134,8 +175,7 @@ def cmd_deals(args: argparse.Namespace) -> None:
         if not deals:
             print(f"  (no listings ≥ {args.min_discount:.0%} under estimate; "
                   f"use --all to see everything)")
-        html_sections.append((f"{search.name} — {model.kind} model, "
-                              f"n={model.n}, R²={model.r2:.2f}", deals))
+        html_sections.append((f"{model_label} — {model.kind}, n={model.n}, R²={model.r2:.2f}{mae_str}", deals))
 
     if args.html:
         center = (cfg.location.latitude, cfg.location.longitude)
