@@ -1,9 +1,9 @@
-# Center point for the search (Wallapop is geo-based). Default: Madrid.
+# Center point for the search (Wallapop is geo-based). Oviedo: northern Spain.
 [location]
-latitude = 40.4168
-longitude = -3.7038
+latitude = 43.3614
+longitude = -5.8494
 # Max distance in km from the point above (Wallapop supports 400 = "all Spain").
-distance_km = 400
+distance_km = 300
 
 # One [[searches]] block per model you want to track.
 # `keywords`      = broad terms typed into Wallapop's search box (run + merged).
@@ -39,7 +39,7 @@ title_excludes = ["zx10r", "zx-10", "z750", "z650", "despiece", "desguace", "pie
 
 [[searches]]
 name = "yamaha-r6"
-keywords = ["yamaha r6", "yzf r6", "yamaha yzf-r6", "r6 600"]
+keywords = ["yamaha r6", "yzf r6", "yamaha yzf-r6", "r6"]
 min_price = 2500
 max_price = 6500
 # Require brand + "r6" so we don't grab a GSX-R600 ("...r600...") or a CBR600.
